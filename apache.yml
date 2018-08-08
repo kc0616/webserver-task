@@ -1,0 +1,96 @@
+---
+- hosts: webserver
+  user: ansible
+  sudo: yes
+  connection: ssh
+  tasks:
+    - name: Update packages list
+      apt: update_cache=yes
+
+    - name: install apache2
+      apt: name=apache2 update_cache=yes state=latest 
+
+    - name: Start service httpd, if not running
+      service:
+        name: apache2
+        state: started
+
+    - name: enabled mod_rewrite
+      apache2_module: name=rewrite state=present
+      notify:
+        - restart apache2
+  
+    - name: Sample HTML
+      template:
+        src: ./sample.html.j2
+        dest: /var/www/html/index.html
+        owner: root
+        group: root
+        mode: 0644
+
+    - name: enabled ssl
+      apache2_module: name=ssl state=present
+      notify:
+        - restart apache2
+     
+    - name: Creates directory
+      file: path=/etc/apache2/ssl state=directory
+
+    - name: create self-signed SSL cert
+      command: openssl req -new -nodes -x509 -subj "/C=US/ST=Oregon/L=Portland/O=IT/CN=kdevweb.online" -days 3650 -keyout /etc/apache2/ssl/apache.key -out /etc/apache2/ssl/apache.crt -extensions v3_ca
+
+    - name: "inserting server name"
+      lineinfile:
+        dest: /etc/apache2/sites-available/default-ssl.conf
+        line: "{{ item }}"
+        insertbefore: 'DocumentRoot /var/www/html'
+      with_items:
+        - 'ServerName www.kdevweb.online'
+        - 'ServerAlias kdevweb.online'  
+    - name: clear default ssl
+      lineinfile:
+        dest: /etc/apache2/sites-available/default-ssl.conf
+        regexp: "{{ item }}"
+        state: absent
+      with_items:
+        - 'SSLCertificateFile /etc/ssl/certs/ssl-cert-snakeoil.pem'
+        - 'SSLCertificateKeyFile /etc/ssl/private/ssl-cert-snakeoil.key'
+    - name: "inserting certificates server name"
+      lineinfile:
+        dest: /etc/apache2/sites-available/default-ssl.conf
+        line: "{{ item }}"
+        insertafter: 'SSLEngine on'
+      with_items:
+        - 'SSLCertificateFile /etc/apache2/ssl/apache.crt'
+        - 'SSLCertificateKeyFile /etc/apache2/ssl/apache.key' 
+    - name: "inserting server name"
+      lineinfile:
+        dest: /etc/apache2/sites-available/000-default.conf
+        line: "{{ item }}"
+        insertbefore: 'DocumentRoot /var/www/html'
+      with_items:
+        - 'ServerName www.kdevweb.online'
+        - 'ServerAlias kdevweb.online'
+      notify:
+        - restart apache2 
+    - name: "Redirecting http to https"
+      lineinfile:
+        dest: /etc/apache2/sites-available/000-default.conf
+        line: Redirect / https://www.kdevweb.online
+        insertbefore: 'DocumentRoot /var/www/html'
+
+    - name: enable default ssl
+      command:  a2ensite default-ssl.conf
+      notify:
+        - restart apache2
+
+    - name: enable default ssl
+      command:  a2ensite default-ssl.conf
+      notify:
+        - restart apache2 
+    
+       
+   
+  handlers:
+    - name: restart apache2
+      service: name=apache2 state=restarted    
